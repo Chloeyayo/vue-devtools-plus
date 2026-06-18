@@ -432,10 +432,11 @@
 import Vue from 'vue'
 import ActionHeader from '@front/components/ActionHeader.vue'
 import ScrollPane from '@front/components/ScrollPane.vue'
-import { escape as escapeHtml, escapeRegExp } from '@utils/util'
+import { escape as escapeHtml, escapeRegExp, BUSINESS_COMPONENT_DETECTOR_SOURCE } from '@utils/util'
 import { retryHighlightDataPath } from '@front/util/locate-field'
 import {
   PAGE_WATCH_SCRIPT,
+  PAGE_WATCH_TEARDOWN_SCRIPT,
   WATCHBOARD_CHANGED_EVENT,
   WATCH_POLL_INTERVAL,
   watchboardState,
@@ -451,7 +452,7 @@ import {
 
 const QUERY_STORAGE_KEY = 'vue-devtools-enhanced-search-query'
 const BUSINESS_FILTER_STORAGE_KEY = 'vue-devtools-business-components-only'
-const SEARCH_POLL_INTERVAL = 1000
+const SEARCH_POLL_INTERVAL = 3000
 const FILTER_NAMES = ['data', 'props', 'computed']
 const MAX_STORED_CHANGES = 30
 const MAX_RENDERED_CHANGES = 6
@@ -478,90 +479,13 @@ function (query, opts) {
   var q = String(query || '').toLowerCase()
   var results = []
   var seen = typeof WeakSet !== 'undefined' ? new WeakSet() : null
-  var INTERNAL_COMPONENT_NAMES = {
-    Transition: true,
-    TransitionGroup: true,
-    KeepAlive: true,
-    RouterView: true,
-    RouterLink: true
-  }
-  var ELEMENT_UI_INTERNAL_COMPONENT_NAMES = {
-    Bar: true,
-    LabelWrap: true,
-    Next: true,
-    Prev: true,
-    Sizes: true
-  }
-  var ELEMENT_UI_PACKAGE_RE = /(?:^|\\/)packages\\/(?:alert|aside|autocomplete|avatar|badge|breadcrumb|button|calendar|card|carousel|cascader|checkbox|collapse|color-picker|container|date-picker|dialog|divider|dropdown|form|header|icon|image|input|input-number|link|main|menu|message|message-box|notification|pagination|popover|progress|radio|rate|scrollbar|select|slider|steps|switch|table|tabs|tag|time-picker|time-select|timeline|tooltip|transfer|tree|upload)(?:\\/|$)/
+  // Business-component detection is shared with the backend via
+  // BUSINESS_COMPONENT_DETECTOR_SOURCE (single source of truth) so the page
+  // script and the component tree can't disagree on what counts as "business".
+  ${BUSINESS_COMPONENT_DETECTOR_SOURCE}
 
   function isElement(value) {
     return typeof HTMLElement !== 'undefined' && value instanceof HTMLElement
-  }
-
-  function getComponentName(vm) {
-    var opt = vm.$options || {}
-    var name = opt.name || opt._componentTag
-    if (name) return name
-    if (opt.__file) {
-      var file = opt.__file.replace(/^.*[\\\\/]/, '').replace(/\\.vue$/, '')
-      return file.charAt(0).toUpperCase() + file.slice(1)
-    }
-    return 'Anonymous'
-  }
-
-  function getComponentFile(vm) {
-    var opt = vm.$options || {}
-    if (opt.__file) return opt.__file
-    var vnode = vm.$vnode
-    var ctorOptions = vnode && vnode.componentOptions && vnode.componentOptions.Ctor && vnode.componentOptions.Ctor.options
-    return ctorOptions && ctorOptions.__file ? ctorOptions.__file : ''
-  }
-
-  function classifyName(name) {
-    return String(name || '')
-      .replace(/[<>]/g, '')
-      .replace(/\\s+/g, '-')
-      .replace(/(?:^|[-_/])(\\w)/g, function (_, c) {
-        return c ? c.toUpperCase() : ''
-      })
-  }
-
-  function isDependencyComponentFile(file) {
-    var normalized = String(file || '').replace(/\\\\/g, '/').toLowerCase()
-    return normalized.indexOf('/node_modules/') !== -1 || normalized.indexOf('node_modules/') === 0
-  }
-
-  function isElementUIComponentName(name) {
-    return /^E[lL][A-Z0-9]/.test(name)
-  }
-
-  function isElementUIComponentFile(file) {
-    return ELEMENT_UI_PACKAGE_RE.test(String(file || '').replace(/\\\\/g, '/').toLowerCase())
-  }
-
-  function isElementUIComponent(name, file) {
-    return isElementUIComponentName(name) || isElementUIComponentFile(file)
-  }
-
-  function hasElementUIAncestor(vm) {
-    var parent = vm.$parent
-    while (parent) {
-      if (isElementUIComponent(classifyName(getComponentName(parent)), getComponentFile(parent))) {
-        return true
-      }
-      parent = parent.$parent
-    }
-    return false
-  }
-
-  function isBusinessComponent(vm) {
-    var file = getComponentFile(vm)
-    var name = classifyName(getComponentName(vm))
-    if (!name && !file) return true
-    if (INTERNAL_COMPONENT_NAMES[name]) return false
-    if (isElementUIComponent(name, file)) return false
-    if (ELEMENT_UI_INTERNAL_COMPONENT_NAMES[name] && hasElementUIAncestor(vm)) return false
-    return file ? !isDependencyComponentFile(file) : true
   }
 
   function getComponentPath(vm) {
@@ -858,6 +782,7 @@ export default {
     this.loadWatched()
     window.addEventListener(WATCHBOARD_CHANGED_EVENT, this.onWatchboardChanged)
     window.addEventListener(ENHANCED_SEARCH_SHORTCUT_EVENT, this.onEnhancedSearchShortcut)
+    document.addEventListener('visibilitychange', this.onVisibilityChange)
     this.$nextTick(() => {
       if (this.$refs.searchInput) {
         this.$refs.searchInput.focus()
@@ -871,8 +796,10 @@ export default {
     clearTimeout(this.locationFeedbackTimer)
     window.removeEventListener(WATCHBOARD_CHANGED_EVENT, this.onWatchboardChanged)
     window.removeEventListener(ENHANCED_SEARCH_SHORTCUT_EVENT, this.onEnhancedSearchShortcut)
+    document.removeEventListener('visibilitychange', this.onVisibilityChange)
     this.stopSearchPolling()
     this.stopWatchPolling()
+    this.teardownPageWatchers()
   },
 
   methods: {
@@ -977,7 +904,8 @@ export default {
         this.activeView !== 'search' ||
         !this.query.trim() ||
         !this.hasActiveFilters ||
-        !this.$isChrome
+        !this.$isChrome ||
+        document.hidden
       ) {
         return
       }
@@ -1097,15 +1025,22 @@ export default {
     },
 
     copyText (value) {
+      let text = String(value == null ? '' : value)
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {})
+        return
+      }
       if (typeof document === 'undefined') return
       let dummyTextArea = document.createElement('textarea')
-      dummyTextArea.textContent = String(value == null ? '' : value)
+      dummyTextArea.textContent = text
       dummyTextArea.setAttribute('readonly', '')
       dummyTextArea.style.position = 'absolute'
       dummyTextArea.style.left = '-9999px'
       document.body.appendChild(dummyTextArea)
       dummyTextArea.select()
-      document.execCommand('copy')
+      try {
+        document.execCommand('copy')
+      } catch (e) {}
       document.body.removeChild(dummyTextArea)
     },
 
@@ -1175,6 +1110,33 @@ export default {
       }
     },
 
+    onVisibilityChange () {
+      // Only poll while the devtools panel is actually visible.
+      if (document.hidden) {
+        this.stopSearchPolling()
+        this.stopWatchPolling()
+      } else if (this.activeView === 'watchboard') {
+        if (this.watched.length) {
+          this.refreshWatched()
+          this.startWatchPolling()
+        }
+      } else {
+        this.startSearchPolling()
+      }
+    },
+
+    teardownPageWatchers () {
+      // The watchboard installed real vm.$watch watchers inside the debugged
+      // page. When the panel closes nobody drains their event queue, so tear
+      // them down to stop the page paying for watchers it can no longer report
+      // to. Best-effort: errors are swallowed since the page may be gone.
+      if (!this.$isChrome) return
+      if (!this.watched.length) return
+      try {
+        chrome.devtools.inspectedWindow.eval('(' + PAGE_WATCH_TEARDOWN_SCRIPT + ')()', () => {})
+      } catch (e) {}
+    },
+
     refreshWatched () {
       if (!this.$isChrome) return
 
@@ -1190,7 +1152,13 @@ export default {
       let script = '(' + PAGE_WATCH_SCRIPT + ')(' + JSON.stringify(items) + ')'
 
       chrome.devtools.inspectedWindow.eval(script, (payload, err) => {
-        if (err || !payload) return
+        if (err) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.warn('[Vue Devtools] watchboard eval failed', err.isError ? err.value : err)
+          }
+          return
+        }
+        if (!payload) return
         let values = Array.isArray(payload) ? payload : (payload.values || [])
         let events = Array.isArray(payload) ? [] : (payload.events || [])
 

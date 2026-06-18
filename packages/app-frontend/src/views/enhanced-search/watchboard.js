@@ -2,7 +2,30 @@ import Vue from 'vue'
 
 export const WATCH_STORAGE_KEY = 'vue-devtools-watched'
 export const WATCHBOARD_CHANGED_EVENT = 'vue-devtools-watchboard-changed'
-export const WATCH_POLL_INTERVAL = 250
+export const WATCH_POLL_INTERVAL = 1000
+
+// Teardown script: tears down every page-side $watch the watchboard created
+// and drops the runtime. Evaluated when the panel is closed so the debugged
+// page stops paying for watchers it can no longer report to anyone.
+export const PAGE_WATCH_TEARDOWN_SCRIPT = `
+function () {
+  var RUNTIME_KEY = '__VUE_DEVTOOLS_WATCHBOARD_RUNTIME__'
+  var runtime = window[RUNTIME_KEY]
+  if (!runtime) return { tornDown: 0 }
+  var count = 0
+  if (runtime.watchers) {
+    Object.keys(runtime.watchers).forEach(function (key) {
+      var watcher = runtime.watchers[key]
+      if (watcher && watcher.unwatch) {
+        try { watcher.unwatch() } catch (e) {}
+        count++
+      }
+    })
+  }
+  delete window[RUNTIME_KEY]
+  return { tornDown: count }
+}
+`
 
 export const PAGE_WATCH_SCRIPT = `
 function (items) {
@@ -44,15 +67,24 @@ function (items) {
       if (instanceMap.has(strUid)) return instanceMap.get(strUid)
     }
 
+    // Cache DOM-scan resolutions for this invocation so we don't re-scan the
+    // whole document once per watched item on every poll tick.
+    if (!runtime.uidCache) runtime.uidCache = {}
+    if (Object.prototype.hasOwnProperty.call(runtime.uidCache, uid)) {
+      return runtime.uidCache[uid]
+    }
+
+    var found = null
     var all = document.querySelectorAll('*')
     for (var i = 0; i < all.length; i++) {
       if (all[i].__vue__) {
         var vm = all[i].__vue__
-        if (vm.__VUE_DEVTOOLS_UID__ == uid || vm._uid == uid) return vm
-        if (vm.$root && (vm.$root.__VUE_DEVTOOLS_UID__ == uid || vm.$root._uid == uid)) return vm.$root
+        if (vm.__VUE_DEVTOOLS_UID__ == uid || vm._uid == uid) { found = vm; break }
+        if (vm.$root && (vm.$root.__VUE_DEVTOOLS_UID__ == uid || vm.$root._uid == uid)) { found = vm.$root; break }
       }
     }
-    return null
+    runtime.uidCache[uid] = found
+    return found
   }
 
   function isDestroyed(vm) {
@@ -395,6 +427,10 @@ function (items) {
       mode: item.mode === 'deep' ? 'deep' : 'value'
     }
   })
+
+  // Refresh the DOM-scan resolution cache each invocation; instances may have
+  // been created/destroyed between polls.
+  runtime.uidCache = {}
 
   syncWatchers(items)
 

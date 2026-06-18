@@ -346,6 +346,108 @@ export function isBusinessComponent (component = {}) {
   return file ? !isDependencyComponentFile(file) : true
 }
 
+/**
+ * Mirrors StateInspector.vue's `toDisplayType(type, true)` class mapping.
+ * Used both by the inspector and by locate-field to find a DataField inside a
+ * given state-type section. Kept here so the two consumers can't drift.
+ *
+ * @param {string} dataType
+ * @returns {string}
+ */
+export function dataTypeToClass (dataType) {
+  return dataType === 'undefined'
+    ? 'data'
+    : String(dataType).replace(/\s/g, '-')
+}
+
+/**
+ * Source of a self-contained, page-injectable `isBusinessComponent(vm)`
+ * function string. This is the single source of truth for the
+ * business-component filter — the Enhanced Search page script and the backend
+ * both derive from this definition so they can't diverge. The function reads
+ * `vm.$options` (name / __file) and walks `vm.$parent`, mirroring
+ * `isBusinessComponent` above which operates on the plain `{ name, file, parent }`
+ * shape produced by `capture()`.
+ */
+export const BUSINESS_COMPONENT_DETECTOR_SOURCE = `
+  var INTERNAL_COMPONENT_NAMES = {
+    Transition: true,
+    TransitionGroup: true,
+    KeepAlive: true,
+    RouterView: true,
+    RouterLink: true
+  }
+  var ELEMENT_UI_INTERNAL_COMPONENT_NAMES = {
+    Bar: true,
+    LabelWrap: true,
+    Next: true,
+    Prev: true,
+    Sizes: true
+  }
+  var ELEMENT_UI_PACKAGE_RE = /(?:^|\\/)packages\\/(?:alert|aside|autocomplete|avatar|badge|breadcrumb|button|calendar|card|carousel|cascader|checkbox|collapse|color-picker|container|date-picker|dialog|divider|dropdown|form|header|icon|image|input|input-number|link|main|menu|message|message-box|notification|pagination|popover|progress|radio|rate|scrollbar|select|slider|steps|switch|table|tabs|tag|time-picker|time-select|timeline|tooltip|transfer|tree|upload)(?:\\/|$)/
+
+  function normalizeComponentFile(file) {
+    return String(file || '').replace(/\\\\/g, '/').toLowerCase()
+  }
+  function classifyName(name) {
+    return String(name || '')
+      .replace(/[<>]/g, '')
+      .replace(/\\s+/g, '-')
+      .replace(/(?:^|[-_/])(\\w)/g, function (_, c) {
+        return c ? c.toUpperCase() : ''
+      })
+  }
+  function isDependencyComponentFile(file) {
+    var normalized = normalizeComponentFile(file)
+    return normalized.indexOf('/node_modules/') !== -1 || normalized.indexOf('node_modules/') === 0
+  }
+  function isElementUIComponentName(name) {
+    return /^E[lL][A-Z0-9]/.test(name)
+  }
+  function isElementUIComponentFile(file) {
+    return ELEMENT_UI_PACKAGE_RE.test(normalizeComponentFile(file))
+  }
+  function isElementUIComponent(name, file) {
+    return isElementUIComponentName(name) || isElementUIComponentFile(file)
+  }
+  function getComponentName(vm) {
+    var opt = vm.$options || vm.fnOptions || {}
+    var name = opt.name || opt._componentTag
+    if (name) return name
+    if (opt.__file) {
+      var file = opt.__file.replace(/^.*[\\\\/]/, '').replace(/\\.vue$/, '')
+      return file.charAt(0).toUpperCase() + file.slice(1)
+    }
+    return 'Anonymous'
+  }
+  function getComponentFile(vm) {
+    var opt = vm.$options || vm.fnOptions || {}
+    if (opt.__file) return opt.__file
+    var vnode = vm.$vnode
+    var ctorOptions = vnode && vnode.componentOptions && vnode.componentOptions.Ctor && vnode.componentOptions.Ctor.options
+    return ctorOptions && ctorOptions.__file ? ctorOptions.__file : ''
+  }
+  function hasElementUIAncestor(vm) {
+    var parent = vm.$parent
+    while (parent) {
+      if (isElementUIComponent(classifyName(getComponentName(parent)), getComponentFile(parent))) {
+        return true
+      }
+      parent = parent.$parent
+    }
+    return false
+  }
+  function isBusinessComponent(vm) {
+    var file = getComponentFile(vm)
+    var name = classifyName(getComponentName(vm))
+    if (!name && !file) return true
+    if (INTERNAL_COMPONENT_NAMES[name]) return false
+    if (isElementUIComponent(name, file)) return false
+    if (ELEMENT_UI_INTERNAL_COMPONENT_NAMES[name] && hasElementUIAncestor(vm)) return false
+    return file ? !isDependencyComponentFile(file) : true
+  }
+`
+
 export function getCustomComponentDefinitionDetails (def) {
   let display = getComponentName(def)
   if (display) {

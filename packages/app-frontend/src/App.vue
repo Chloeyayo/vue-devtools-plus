@@ -228,7 +228,17 @@ export default {
               return false
             }
             break
+          case 'ctrl+shift+alt':
+            if (key === 'f' || code === 'KeyF') {
+              this.$router.push({ name: 'enhanced-search' })
+              return false
+            }
+            break
           case 'shift+alt':
+            // shift+alt is reserved by most browsers/OS for menu access keys
+            // and frequently doesn't reach us. The ctrl+shift+alt binding
+            // above is the reliable one; keep this as a fallback for muscle
+            // memory where the OS doesn't swallow it.
             if (key === 'f' || code === 'KeyF') {
               this.$router.push({ name: 'enhanced-search' })
               return false

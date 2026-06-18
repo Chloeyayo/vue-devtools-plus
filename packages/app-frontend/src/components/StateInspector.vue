@@ -41,6 +41,7 @@
 import Vue from 'vue'
 import Defer from '@front/mixins/defer'
 import StateFields from './StateFields.vue'
+import { dataTypeToClass } from '@utils/util'
 
 const keyOrder = {
   props: 1,
@@ -128,11 +129,9 @@ export default {
 
   methods: {
     toDisplayType (dataType, asClass) {
-      return dataType === 'undefined'
-        ? 'data'
-        : asClass
-          ? dataType.replace(/\s/g, '-')
-          : dataType
+      return asClass
+        ? dataTypeToClass(dataType)
+        : (dataType === 'undefined' ? 'data' : dataType)
     },
 
     isExpanded (dataType) {

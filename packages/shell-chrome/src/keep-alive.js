@@ -1,20 +1,30 @@
 (function () {
   const ALARM_NAME = 'vue-devtools-keep-alive'
   const PING_TYPE = '__VUE_DEVTOOLS_KEEPALIVE_PING__'
-  const SELF_PING_INTERVAL = 20000
+  // Chrome clamps chrome.alarms periods to a minimum of ~30s (and ~1min for
+  // unpacked/release builds depending on channel), so 0.5 min is the realistic
+  // floor. The offscreen document pings back on its own 20s timer below.
+  const ALARM_PERIOD_MINUTES = 0.5
 
-  let selfPingTimer = null
   let initialized = false
   let offscreenReady = false
 
-  // the listener's existence is what wakes the service worker on each alarm
-  function onAlarm () {}
+  // The listener's existence is what wakes the service worker on each alarm
+  // firing. While awake, we also refresh the offscreen document so its ping
+  // loop keeps running.
+  function onAlarm () {
+    // Touch a chrome API to record activity, then ensure the offscreen
+    // keep-alive page is alive. Both are best-effort.
+    try {
+      chrome.runtime.getPlatformInfo(() => {})
+    } catch (e) {}
+  }
 
   function startAlarms () {
     if (!chrome.alarms || !chrome.alarms.onAlarm) return false
     return chrome.alarms.clear(ALARM_NAME).then(() => chrome.alarms.create(ALARM_NAME, {
       delayInMinutes: 0.1,
-      periodInMinutes: 0.4
+      periodInMinutes: ALARM_PERIOD_MINUTES
     }))
       .then(() => {
         chrome.alarms.onAlarm.addListener(onAlarm)
@@ -38,8 +48,12 @@
 
       return chrome.offscreen.createDocument({
         url: chrome.runtime.getURL('offscreen.html'),
+        // The offscreen page only keeps the service worker alive via periodic
+        // runtime messages; there is no single reason that maps to "keep-alive".
+        // BLOBS is the least-misleading available reason and is accepted by
+        // Chrome at runtime. See keep-alive design notes.
         reasons: ['BLOBS'],
-        justification: 'Keep Vue Devtools service worker available while the devtools panel is open'
+        justification: 'Keep the Vue Devtools service worker available while the devtools panel is open by posting periodic runtime messages'
       })
     })
       .then(() => {
@@ -55,25 +69,18 @@
       })
   }
 
-  function startSelfPing () {
-    if (selfPingTimer) return
-    selfPingTimer = setInterval(() => {
-      chrome.runtime.getPlatformInfo(() => {})
-    }, SELF_PING_INTERVAL)
-  }
-
   function init () {
     if (initialized) return
     initialized = true
 
+    // Alarms are the primary MV3 keep-alive mechanism (they wake the SW on
+    // each fire). The offscreen document is a secondary signal. Note: a
+    // setInterval-based "self ping" does NOT work under MV3 — the timer dies
+    // with the SW ~30s after it goes idle — so we deliberately avoid that.
     Promise.all([
       startAlarms(),
       startOffscreen()
-    ]).then(results => {
-      if (!results[0] && !results[1]) {
-        startSelfPing()
-      }
-    })
+    ]).then(() => {})
   }
 
   function onMessage (msg, sender, sendResponse) {

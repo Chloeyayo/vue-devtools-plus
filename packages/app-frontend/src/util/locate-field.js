@@ -1,4 +1,5 @@
 import Vue from 'vue'
+import { dataTypeToClass } from '@utils/util'
 
 // Locates a DataField in the components inspector by state path:
 // expands each segment, scrolls into view and flashes a highlight,
@@ -15,7 +16,7 @@ function getAppVm () {
 
 function walkVms (vm, cb) {
   if (!vm) return
-  cb(vm)
+  if (cb(vm) === false) return
   const children = vm.$children || []
   for (let i = 0; i < children.length; i++) {
     walkVms(children[i], cb)
@@ -26,11 +27,9 @@ function isInTypeSection (vm, type) {
   if (!type || !vm.$el || !vm.$el.closest) return true
   const container = vm.$el.closest('.data-el')
   if (!container) return true
-  // mirror StateInspector's toDisplayType class mapping
-  const typeClass = type === 'undefined'
-    ? 'data'
-    : String(type).replace(/\s/g, '-')
-  return container.classList.contains(typeClass)
+  // Shared with StateInspector via @utils/util.dataTypeToClass so the class
+  // mapping can't drift between the inspector and this locator.
+  return container.classList.contains(dataTypeToClass(type))
 }
 
 function findDataFieldVm (path, type) {
@@ -45,6 +44,7 @@ function findDataFieldVm (path, type) {
       normalizeDataPath(vm.path) === path
     ) {
       match = vm
+      return false // stop walking once we've found it
     }
   })
   return match
