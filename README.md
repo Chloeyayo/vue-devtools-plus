@@ -1,8 +1,8 @@
-# vetur-plus
+# vue-devtools-plus
 
-Vetur, but better.
+Vue Devtools, but better.
 
-`vetur-plus` is a customized fork of Vue Devtools v5.3.4 focused on improving the Vue development experience.
+`vue-devtools-plus` is a customized fork of Vue Devtools v5.3.4 focused on improving the Vue development experience.
 
 ## Development
 
