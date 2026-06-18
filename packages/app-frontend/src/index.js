@@ -10,6 +10,7 @@ import { parse } from '@utils/util'
 import { isChrome, initEnv } from '@utils/env'
 import SharedData, { init as initSharedData, destroy as destroySharedData } from '@utils/shared-data'
 import { init as initStorage } from '@utils/storage'
+import { restoreSelection } from './util/selected-instance'
 
 // register filters
 for (const key in filters) {
@@ -143,6 +144,9 @@ function initApp (shell) {
 
       bridge.on('flush', payload => {
         store.commit('components/FLUSH', parse(payload))
+        // Re-select the component the user had inspected before the page
+        // reloaded / hot-reloaded, now that the fresh tree is available.
+        restoreSelection(store)
       })
 
       bridge.on('instance-details', details => {

@@ -1,4 +1,5 @@
 import Vue from 'vue'
+import { rememberSelection } from '@front/util/selected-instance'
 
 const state = {
   selected: null,
@@ -86,6 +87,8 @@ const actions = {
         expanded: true,
         parent: true
       })
+      // Remember the selection so it can be re-applied after a page reload / HMR.
+      rememberSelection(instance)
     }
     bridge.send('select-instance', uid)
   },
