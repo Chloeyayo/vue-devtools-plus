@@ -1,7 +1,7 @@
 {
-  "name": "vue-devtools",
+  "name": "vetur-plus",
   "version": "5.3.4",
-  "description": "devtools for Vue.js!",
+  "description": "Vetur, but better.",
   "private": true,
   "packageManager": "bun@1.4.0",
   "workspaces": [
@@ -29,14 +29,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vuejs/vue-devtools.git"
+    "url": "git+https://github.com/Chloeyayo/vetur-plus.git"
   },
   "author": "Evan You",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/vuejs/vue-devtools/issues"
+    "url": "https://github.com/Chloeyayo/vetur-plus/issues"
   },
-  "homepage": "https://github.com/vuejs/vue-devtools#readme",
+  "homepage": "https://github.com/Chloeyayo/vetur-plus#readme",
   "devDependencies": {
     "autoprefixer": "^9.1.5",
     "cross-env": "^5.2.0",
